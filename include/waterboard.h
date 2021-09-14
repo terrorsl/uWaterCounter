@@ -1,7 +1,9 @@
 #ifndef UWATERCOUNTER_FILE
 #define UWATERCOUNTER_FILE
 
+#include"config.h"
 #include<WiFiManager.h>
+#include<TinyMqtt.h>
 
 #define WATER_DEVICE_IDENTY (('W'<<8)|'B')
 
@@ -15,6 +17,13 @@
 #define COLD_PIN 13
 #define HOT_PIN COLD_PIN+1
 
+#define TIME_SEC_TO_MS(ms) ms*1000
+#define TIME_MIN_TO_SEC(m) m*60
+#define TIME_HOUR_TO_MIN(h) h*60
+#define TIME_DAY_TO_HOUR(d) d*24
+
+#define TIME_BETWEEN_SLEEP TIME_SEC_TO_MS(TIME_MIN_TO_SEC(1))
+#define TIME_BETWEEN_UPDATE TIME_MIN_TO_SEC(1)
 #define TIME_BETWEEN_PUBLISH 60000
 
 struct WaterBoardDevice
@@ -31,6 +40,11 @@ struct WaterBoardDevice
 	unsigned long value;
 	char serial[32];
 };
+struct MQTTServerData
+{
+	char server[40];
+	short port;
+};
 
 class UWaterCounter
 {
@@ -40,18 +54,30 @@ public:
 	void setup();
 	void loop();
 
+	void StartWiFiManager() { isWiFiManager = true; };
+
 	void save();
 
 	void light_sleep();
+
+	void SetMqttServerData(const char *server, short port) {
+		strcpy(serverData.server, server);
+		serverData.port = port;
+	};
 private:
-	bool is_initialise;
+	void InitialiseWiFiManager();
+
+	bool isWiFiManager,is_initialise;
 	WiFiManager wifiManager;
 	
 	WiFiClient client;
 
 	String mqttData;
 
+	MqttClient mqtt_client;
 	WaterBoardDevice water_devices[MAX_WATER_DEVICE];
+	MQTTServerData serverData;
+	unsigned long lastUpdaterTime;
 	bool need_save;
 
 	bool readEEPROMConfig();

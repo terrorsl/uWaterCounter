@@ -1,5 +1,12 @@
+#include"../include/version.h"
 #include"../include/waterboard.h"
 #include"../include/updater.h"
+
+#include <WiFiUdp.h>
+#include <NTPClient.h>
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org");
+
 #include<Chronos.h>
 //#include"getTime.h"
 
@@ -13,7 +20,7 @@
 
 #define ThisDeviceName(out,id) sprintf(out,"UWaterCounter_%d",id)
 
-ADC_MODE(ADC_VCC);
+//ADC_MODE(ADC_VCC);
 
 WiFiClient net;
 MQTTClient mqtt;//("waterboard","192.168.212.103",1883);
@@ -79,9 +86,13 @@ void IRAM_ATTR BatteryDeviceCallback(void *arg)
 	send_data_to_server = true;
 	sei();
 };
-void IRAM_ATTR WIFIConnectManager(void *arg)
+void IRAM_ATTR WIFIConnectManagerCallback(void *arg)
 {
-	led_blink_tiker.attach_ms(100, led_ticker_callback);
+	cli();
+	UWaterCounter *data = (UWaterCounter*)arg;
+	data->StartWiFiManager();
+	sei();
+	/*led_blink_tiker.attach_ms(100, led_ticker_callback);
 	char ssid[32];
 	ThisDeviceName(ssid,ESP.getChipId());
 
@@ -91,8 +102,14 @@ void IRAM_ATTR WIFIConnectManager(void *arg)
 	wifiManager.addParameter(&custom_mqtt_port);
 
 	wifiManager.setSaveConfigCallback(saveConfig);
-	wifiManager.autoConnect(ssid);
-	led_blink_tiker.detach();
+	wifiManager.resetSettings();
+
+	wifiManager.autoConnect(ssid);;
+	cli();
+	MQTTServerData *data = (MQTTServerData*)arg;
+	//water->SetMqttServerData(custom_mqtt_server.getValue(), String(custom_mqtt_port.getValue()).toInt());
+	sei();
+	led_blink_tiker.detach();*/
 };
 
 void myConnectedCb()
@@ -142,7 +159,7 @@ void UWaterCounter::initPinAndInterrupt()
 	pinMode(BATTERY_PIN, INPUT_PULLUP);
 	pinMode(LED_BUILTIN,OUTPUT);
 
-	attachInterruptArg(digitalPinToInterrupt(CONNECT_PIN), WIFIConnectManager, 0, FALLING);
+	attachInterruptArg(digitalPinToInterrupt(CONNECT_PIN), WIFIConnectManagerCallback, this, FALLING);
 	attachInterruptArg(digitalPinToInterrupt(BATTERY_PIN), BatteryDeviceCallback, this, FALLING);
 
 	for(int i=0;i<MAX_WATER_DEVICE;i++)
@@ -150,14 +167,15 @@ void UWaterCounter::initPinAndInterrupt()
 		pinMode(water_devices[i].pin,INPUT_PULLUP);
 		attachInterruptArg(digitalPinToInterrupt(water_devices[i].pin),WaterDeviceCallback,&water_devices[i],FALLING);
 	}
+
+	digitalWrite(LED_BUILTIN, HIGH);
 };
 void UWaterCounter::connect()
 {
 	WiFi.begin();
 	WiFi.waitForConnectResult();
 
-	const char *ip = WiFi.gatewayIP().toString().c_str();
-	mqtt.begin(ip, net);
+	mqtt_client.connect(serverData.server, serverData.port);
 };
 
 void UWaterCounter::setup()
@@ -168,12 +186,14 @@ void UWaterCounter::setup()
 	bool firstTime=readEEPROMConfig();
 	initPinAndInterrupt();
 
-	if(firstTime || digitalRead(CONNECT_PIN)==LOW)
-		WIFIConnectManager(0);
+	Serial.println(VERSION_STR);
 
-	Updater updater;
+	//if(firstTime || digitalRead(CONNECT_PIN)==LOW)
+	//	WIFIConnectManager(this);
+
+	/*Updater updater;
 	updater.initialise();
-	updater.run();
+	updater.run();*/
 #if 0
 	//attachInterruptArg(digitalPinToInterrupt(CONNECT_PIN),WaterDeviceCallback,&water_devices[0],FALLING);
 	//attachInterrupt(digitalPinToInterrupt(LED_PIN),LedDeviceCallback,FALLING);
@@ -266,18 +286,24 @@ static bool send_over=false;
 
 void UWaterCounter::light_sleep()
 {
+	Serial.println("goto sleep");
+	delay(200);
+	wifi_station_disconnect();
+	delay(1000);
 	wifi_set_opmode(NULL_MODE);    // set WiFi mode to null mode.
+	os_delay_us(5000);
 	wifi_fpm_set_sleep_type(LIGHT_SLEEP_T); // light sleep
-	wifi_fpm_open();  
 	/*PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTCK_U,3);*/
 	/*gpio_pin_wakeup_enable(14, GPIO_PIN_INTR_LOLEVEL);*/
 	for(int i=0;i<MAX_WATER_DEVICE;i++)
-		gpio_pin_wakeup_enable(water_devices[i].pin,GPIO_PIN_INTR_LOLEVEL);
-
-	gpio_pin_wakeup_enable(CONNECT_PIN, GPIO_PIN_INTR_LOLEVEL);
-	gpio_pin_wakeup_enable(BATTERY_PIN, GPIO_PIN_INTR_LOLEVEL);
+		gpio_pin_wakeup_enable(GPIO_ID_PIN(water_devices[i].pin),GPIO_PIN_INTR_LOLEVEL);
+	gpio_pin_wakeup_enable(GPIO_ID_PIN(CONNECT_PIN), GPIO_PIN_INTR_LOLEVEL);
+	gpio_pin_wakeup_enable(GPIO_ID_PIN(BATTERY_PIN), GPIO_PIN_INTR_LOLEVEL);
+	wifi_fpm_open();
 	/*wifi_fpm_set_wakeup_cb(fpm_wakup_cb_func1); // Set wakeup callback*/
 	wifi_fpm_do_sleep(0xFFFFFFF);
+	delay(200);
+	Serial.println("wakeup");
 };
 
 bool UWaterCounter::makeData()
@@ -287,6 +313,7 @@ bool UWaterCounter::makeData()
 	if(send_data_to_server)
 	{
 		DynamicJsonDocument doc(1024);
+		doc["firmware"] = FIRMWARE;
 		doc["serial"][0]=water_devices[0].serial;
 		doc["serial"][1]=water_devices[1].serial;
 		doc["data"][0]=water_devices[0].value;
@@ -298,24 +325,89 @@ bool UWaterCounter::makeData()
 	sei();
 	return ret;
 };
+void UWaterCounter::InitialiseWiFiManager()
+{
+	isWiFiManager = false;
+	char ssid[32];
+	ThisDeviceName(ssid, ESP.getChipId());
 
+	WiFiManagerParameter custom_mqtt_server("server", "mqtt server", "uhome.local", 40);
+	WiFiManagerParameter custom_mqtt_port("port", "mqtt port", "1883", 6);
+	wifiManager.addParameter(&custom_mqtt_server);
+	wifiManager.addParameter(&custom_mqtt_port);
+
+	//wifiManager.setSaveConfigCallback(saveConfig);
+	wifiManager.resetSettings();
+
+	wifiManager.autoConnect(ssid);
+
+	strcpy(serverData.server,custom_mqtt_server.getValue());
+	serverData.port=String(custom_mqtt_port.getValue()).toInt();
+};
 void UWaterCounter::loop()
 {
-	mqtt.loop();
+	if (isWiFiManager)
+		InitialiseWiFiManager();
+	if (WiFi.isConnected() == false)
+		connect();
+	if (timeClient.isTimeSet())
+	{
+		if (lastUpdaterTime == 0)
+			lastUpdaterTime = timeClient.getEpochTime();
+		if (timeClient.getEpochTime() - lastUpdaterTime > TIME_BETWEEN_UPDATE)
+		{
+			lastUpdaterTime = timeClient.getEpochTime();
+			Serial.print(TIME_BETWEEN_UPDATE);
+			Serial.print("\n");
+			Updater *updater=new Updater();
+			if (updater->initialise())
+				updater->run();
+			delete updater;
+		}
+	}
+	if (makeData())
+	{
+		char ssid[32];
+		ThisDeviceName(ssid, ESP.getChipId());
+		mqtt_client.publish(ssid, mqttData);
+	}
+
+	mqtt_client.loop();
+	timeClient.update();
+
+	//ms
+	float delta = (after - before) / 1000.f;
+	if (delta > TIME_BETWEEN_SLEEP)
+	{
+		if(mqtt_client.connected())
+			mqtt_client.close();
+		timeClient.end();
+		before = after;
+		delay(200);
+		light_sleep();
+	}
+	if(delta>TIME_SEC_TO_MS(1))
+		Serial.println(delta);
+	after = getRTCTime();
+
+#if 0
 	//ms
 	float delta=(after-before)/1000.f;
 	if(delta>=TIME_BETWEEN_PUBLISH)
 	{
 		if(makeData())
 		{
+			Serial.println("makeData()");
 			connect();
+			timeClient.begin();
+			//todo update if no mqtt
 			if(WiFi.isConnected())
 			{
-				char ssid[32];
-				ThisDeviceName(ssid, ESP.getChipId());
-				if(mqtt.connect(ssid))
+				if (mqtt_client.connected())
 				{
-					mqtt.publish("",mqttData);
+					char ssid[32];
+					ThisDeviceName(ssid, ESP.getChipId());
+					mqtt_client.publish(ssid, mqttData);
 				}
 			}
 			else
@@ -323,9 +415,14 @@ void UWaterCounter::loop()
 				light_sleep();
 			}
 		}
+		else
+		{
+			light_sleep();
+		}
 		before=after;
 	}
 	after=getRTCTime();
+#endif
 
 #if 0
 	//delay(200);
@@ -517,7 +614,7 @@ void UWaterCounter::saveDevicesToEEPROM()
 {
 	need_save=false;
 
-	int max_need_rom=2+sizeof(WaterBoardDevice)*MAX_WATER_DEVICE;
+	int max_need_rom=2+sizeof(WaterBoardDevice)*MAX_WATER_DEVICE+sizeof(MQTTServerData);
 	unsigned long address=0;
 	EEPROM.begin(max_need_rom);
 	unsigned short identy;
@@ -528,13 +625,18 @@ void UWaterCounter::saveDevicesToEEPROM()
 		EEPROM.put(address,water_devices[i]);
 		address+=sizeof(WaterBoardDevice);
 	}
+	EEPROM.put(address, serverData);
 	EEPROM.end();
 };
-UWaterCounter::UWaterCounter()
+UWaterCounter::UWaterCounter():isWiFiManager(false)
 {
 	water_devices[0].pin=HOT_PIN;
 	water_devices[0].type=HOT_WATER;
 
 	water_devices[1].pin=COLD_PIN;
 	water_devices[1].type=COLD_WATER;
+
+	strcpy(serverData.server, "uhome.local");
+	serverData.port = 1883;
+	lastUpdaterTime = 0;
 };
