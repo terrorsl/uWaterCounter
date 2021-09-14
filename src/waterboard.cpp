@@ -1,6 +1,6 @@
-#include"../include/version.h"
-#include"../include/waterboard.h"
-#include"../include/updater.h"
+#include"version.h"
+#include"waterboard.h"
+#include"updater.h"
 
 #include <WiFiUdp.h>
 #include <NTPClient.h>
