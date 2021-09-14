@@ -15,15 +15,10 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org");
 #include<EEPROM.h>
 #include <ArduinoJson.h>
 
-//#define MQTT_DEBUG_ON 1
-#include "MQTT.h"
-
 #define ThisDeviceName(out,id) sprintf(out,"UWaterCounter_%d",id)
 
 //ADC_MODE(ADC_VCC);
 
-WiFiClient net;
-MQTTClient mqtt;//("waterboard","192.168.212.103",1883);
 WiFiManager wifiManager;
 
 namespace EventTimeType
@@ -35,8 +30,6 @@ namespace EventTimeType
 		Max
 	};
 };
-
-//NTPService ntpService;
 
 DefineCalendarType(Calendar,EventTimeType::Max);
 Calendar calendar;
@@ -92,24 +85,6 @@ void IRAM_ATTR WIFIConnectManagerCallback(void *arg)
 	UWaterCounter *data = (UWaterCounter*)arg;
 	data->StartWiFiManager();
 	sei();
-	/*led_blink_tiker.attach_ms(100, led_ticker_callback);
-	char ssid[32];
-	ThisDeviceName(ssid,ESP.getChipId());
-
-	WiFiManagerParameter custom_mqtt_server("server", "mqtt server", "uhome.local", 40);
-	WiFiManagerParameter custom_mqtt_port("port", "mqtt port", "1883", 6);
-	wifiManager.addParameter(&custom_mqtt_server);
-	wifiManager.addParameter(&custom_mqtt_port);
-
-	wifiManager.setSaveConfigCallback(saveConfig);
-	wifiManager.resetSettings();
-
-	wifiManager.autoConnect(ssid);;
-	cli();
-	MQTTServerData *data = (MQTTServerData*)arg;
-	//water->SetMqttServerData(custom_mqtt_server.getValue(), String(custom_mqtt_port.getValue()).toInt());
-	sei();
-	led_blink_tiker.detach();*/
 };
 
 void myConnectedCb()
@@ -149,6 +124,7 @@ bool UWaterCounter::readEEPROMConfig()
 			EEPROM.get(address,water_devices[i]);
 			address+=sizeof(WaterBoardDevice);
 		}
+		EEPROM.get(address, serverData);
 		return false;
 	}
 	return true;
@@ -188,98 +164,8 @@ void UWaterCounter::setup()
 
 	Serial.println(VERSION_STR);
 
-	//if(firstTime || digitalRead(CONNECT_PIN)==LOW)
-	//	WIFIConnectManager(this);
-
-	/*Updater updater;
-	updater.initialise();
-	updater.run();*/
-#if 0
-	//attachInterruptArg(digitalPinToInterrupt(CONNECT_PIN),WaterDeviceCallback,&water_devices[0],FALLING);
-	//attachInterrupt(digitalPinToInterrupt(LED_PIN),LedDeviceCallback,FALLING);
-
-	//wifiManager.setConfigPortalTimeout(60);
-	//wifiManager.setDebugOutput(false);
-	is_initialise=false;
-
-	calendar.add(Chronos::Event(EventTimeType::Save,Chronos::Mark::Hourly(60),Chronos::Span::Seconds(10)));
-	calendar.add(Chronos::Event(EventTimeType::Updater,Chronos::Mark::Weekly(Chronos::Weekday::Wednesday,23,0,0),Chronos::Span::Seconds(10)));
-
-	int max_need_rom=2+sizeof(WaterBoardDevice)*MAX_WATER_DEVICE;
-	unsigned long address=0;
-	EEPROM.begin(max_need_rom);
-	unsigned short identy;
-	EEPROM.get(address,identy);
-	address+=2;
-	if(identy==WATER_DEVICE_IDENTY)
-	{
-		for(int i=0;i<MAX_WATER_DEVICE;i++)
-		{
-			EEPROM.get(address,water_devices[i]);
-			address+=sizeof(WaterBoardDevice);
-
-			pinMode(water_devices[i].pin,INPUT_PULLUP);
-		}
-	}
-	else
-	{
-		for(int i=0;i<MAX_WATER_DEVICE;i++)
-		{
-			water_devices[i].pin=i+COLD_PIN;
-			pinMode(water_devices[i].pin,INPUT_PULLUP);
-		}
-		firstTime=true;
-	}
-	EEPROM.end();
-
-	need_save=false;
-
-	if(firstTime || digitalRead(CONNECT_PIN)==LOW)
-	{
-		led_blink_tiker.attach_ms(100,led_ticker_callback);
-		String ssid=DEVICE_NAME+'_'+ESP.getChipId();
-		wifiManager.setSaveConfigCallback(saveConfig);
-		wifiManager.autoConnect(ssid.c_str()); 
-	}
-	/*else
-	{
-	}*/
-
-	/*if(digitalRead(CONNECT_PIN)==LOW)
-	{
-		String ssid=DEVICE_NAME+'_'+ESP.getChipId();
-		wifiManager.autoConnect(ssid.c_str());
-	}
-	else
-		WiFi.waitForConnectResult();
-		*/
-#if 0
-	WiFi.persistent(false);
-	WiFi.disconnect(true);
-	WiFi.mode(WIFI_STA);
-	//WiFi.setSleepMode(WIFI_LIGHT_SLEEP,0xFFFFFFF);
-
-	WiFi.begin("terror","terror23011985");
-	while (WiFi.status() != WL_CONNECTED) {
-		delay(500);
-		//send(".");
-	}
-
-	//mqtt.onConnected(myConnectedCb);
-	//mqtt.onData(myDataCb);
-
-	/*mqtt.connect();
-	String data("456");
-	mqtt.publish("waterboard/value",data,0,1);
-	//mqtt.subscribe("broker/counter");
-	mqtt.subscribe("new");*/
-	Serial.println(ESP.getChipId());
-	Serial.println("setup done");
-#endif
-#endif
 	before=getRTCTime();
 	after=before;
-	//WiFi.forceSleepBegin();
 };
 static bool state=LOW;
 static bool send_over=false;
@@ -336,7 +222,6 @@ void UWaterCounter::InitialiseWiFiManager()
 	wifiManager.addParameter(&custom_mqtt_server);
 	wifiManager.addParameter(&custom_mqtt_port);
 
-	//wifiManager.setSaveConfigCallback(saveConfig);
 	wifiManager.resetSettings();
 
 	wifiManager.autoConnect(ssid);
@@ -386,8 +271,6 @@ void UWaterCounter::loop()
 		delay(200);
 		light_sleep();
 	}
-	if(delta>TIME_SEC_TO_MS(1))
-		Serial.println(delta);
 	after = getRTCTime();
 
 #if 0
@@ -423,171 +306,6 @@ void UWaterCounter::loop()
 	}
 	after=getRTCTime();
 #endif
-
-#if 0
-	//delay(200);
-	float delta=(after-before)/1000.f;
-	if(delta>3000)
-	{
-		Serial.println("go light sleep");
-		delay(200);
-		//light_sleep();
-		delay(200);
-		Serial.println("wake up");
-		before=after;
-	}
-	after=getRTCTime();
-	Serial.println(delta);
-	delay(200);
-	return;
-	/*mqtt.connect();
-	String data(water_devices[0].value);
-	mqtt.publish("waterboard/value",data,0,1);
-	mqtt.disconnect();*/
-	//if(WiFi.status()!=WL_CONNECTED)
-	if(WiFi.isConnected()==false)
-	{
-		Serial.println("connect ot WiFi");
-		connect();
-		/*WiFi.begin();
-		delay(1000);*/
-	}
-	else
-	{
-		cli();
-		if(send_data_to_server)
-		{
-			DynamicJsonDocument doc(1024);
-			doc["serial"][0]=water_devices[0].serial;
-			doc["serial"][1]=water_devices[1].serial;
-			doc["data"][0]=water_devices[0].value;
-			doc["data"][1]=water_devices[1].value;
-			serializeJson(doc, mqttData);
-			send_data_to_server=false;
-
-			/*if(mqtt.isConnected()==false)
-			{
-				mqtt.connect();
-				while(mqtt.isConnected()==false);
-			}
-			//else
-			{
-				Serial.println("send data to mqtt server");
-				String data;//(water_devices[0].value);
-
-				DynamicJsonDocument doc(1024);
-				doc["serial"][0]=water_devices[0].serial;
-				doc["serial"][1]=water_devices[1].serial;
-				doc["data"][0]=water_devices[0].value;
-				doc["data"][1]=water_devices[1].value;
-				serializeJson(doc, data);
-
-				String topic("waterboard/");
-				topic=topic+ESP.getChipId()+"/data";
-				mqtt.publish(topic,data,0,1);
-				//mqtt.disconnect();
-				delay(5000);
-				send_data_to_server=false;
-				send_over=true;
-			}*/
-		}
-		sei();
-
-		if(mqttData.length()==0)
-		{
-			delay(2000);
-			Serial.println("sleep");
-			WiFi.forceSleepBegin();
-			delay(20000);
-			Serial.println("wake up");
-			WiFi.forceSleepWake();
-			WiFi.waitForConnectResult();
-		}
-		else
-		{
-			//if(mqtt.isConnected()==false)
-			{
-				mqtt.connect();
-				delay(5000);
-				String topic("waterboard/");
-				topic=topic+ESP.getChipId()+"/data";
-				mqtt.publish(topic,mqttData,0,1);
-				mqttData.clear();
-				delay(5000);
-				//mqtt.disconnect();
-				//delay(5000);
-			}
-		}
-	}
-#endif
-	/*float v=ESP.getVcc()/1024.0;
-	Serial.println(v);*/
-	
-	/*
-	WiFi.forceSleepBegin();
-	Serial.println("WiFi is down");
-	delay(20000);
-	state=!state;
-	digitalWrite(BUILTIN_LED,state);
-	WiFi.forceSleepWake();
-	Serial.println("WiFi is up");
-	delay(2000);
-	*/
-
-	/*if(WiFi.isConnected()==false)
-	{
-		String ssid=DEVICE_NAME+'_'+ESP.getChipId();
-		if(wifiManager.autoConnect(ssid))
-		{
-			Serial.println("connect");
-			//Serial.println(client.connect("192.168.4.1",1500));
-
-			Serial.println(WiFi.gatewayIP().toString().c_str());
-			Serial.println(WiFi.localIP());
-			Serial.println(WiFi.dnsIP().toString().c_str());
-
-			ntpService.initialise("ru.pool.ntp.org");
-			ntpService.SetCheckInterval(SECS_PER_HOUR);
-			//WiFi.hostByName("ru.pool.ntp.org", timeServerIP);
-			//setSyncProvider(getNtpTime);
-			Updater updater;
-			updater.initialise();
-			updater.run();
-
-			connect.connect();
-		}
-	}
-	else
-		updateMessage();
-
-	updateResource();
-
-	Chronos::Event::Occurrence occurrenceList[4];
-	int numOngoing = calendar.listOngoing(4,occurrenceList, Chronos::DateTime::now());
-	if(numOngoing)
-	{
-		// At least one event is happening at "nowTime"...
-		for(int i = 0; i < numOngoing; i++)
-		{
-			switch(occurrenceList[i].id)
-			{
-			case EventTimeType::Save:
-				if(need_save)
-					saveDevicesToEEPROM();
-				break;
-			case EventTimeType::Updater:
-				{
-					Updater updater;
-					if(updater.initialise())
-					{
-						saveDevicesToEEPROM();
-						updater.run();
-					}
-				}
-				break;
-			}
-		}
-	}*/
 };
 void UWaterCounter::updateResource()
 {
