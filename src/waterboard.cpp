@@ -52,13 +52,6 @@ void led_ticker_callback()
 	led_state = led_state + cstep;
 	analogWrite(LED_BUILTIN, led_state);
 };
-void saveConfig()
-{
-	char ssid[32];
-	ThisDeviceName(ssid, ESP.getChipId());
-	mqtt.connect(ssid);
-	mqtt.publish("new", ssid);
-};
 
 void IRAM_ATTR WaterDeviceCallback(void *arg)
 {
@@ -306,23 +299,6 @@ void UWaterCounter::loop()
 	}
 	after=getRTCTime();
 #endif
-};
-void UWaterCounter::updateResource()
-{
-	for(int i=0;i<MAX_WATER_DEVICE;i++)
-	{
-		if(digitalRead(water_devices[i].pin)==LOW)
-		{
-			if(water_devices[i].state==0)
-			{
-				water_devices[i].value+=10;
-				water_devices[i].state=1;
-				need_save=true;
-			}
-		}
-		else
-			water_devices[i].state=0;
-	}
 };
 void UWaterCounter::save()
 {

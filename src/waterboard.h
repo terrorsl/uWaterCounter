@@ -22,8 +22,8 @@
 #define TIME_HOUR_TO_MIN(h) h*60
 #define TIME_DAY_TO_HOUR(d) d*24
 
-#define TIME_BETWEEN_SLEEP TIME_SEC_TO_MS(TIME_MIN_TO_SEC(1))
-#define TIME_BETWEEN_UPDATE TIME_MIN_TO_SEC(1)
+#define TIME_BETWEEN_SLEEP TIME_SEC_TO_MS(TIME_MIN_TO_SEC(2))
+#define TIME_BETWEEN_UPDATE TIME_MIN_TO_SEC(60)
 #define TIME_BETWEEN_PUBLISH 60000
 
 struct WaterBoardDevice
@@ -50,6 +50,7 @@ class UWaterCounter
 {
 public:
 	UWaterCounter();
+	UWaterCounter(int hot_pin,int cold_pin);
 
 	void setup();
 	void loop();
@@ -59,11 +60,6 @@ public:
 	void save();
 
 	void light_sleep();
-
-	void SetMqttServerData(const char *server, short port) {
-		strcpy(serverData.server, server);
-		serverData.port = port;
-	};
 private:
 	void InitialiseWiFiManager();
 
@@ -80,19 +76,11 @@ private:
 	unsigned long lastUpdaterTime;
 	bool need_save;
 
-	bool readEEPROMConfig();
 	void initPinAndInterrupt();
 	void connect();
 	bool makeData();
 
-	void resetConfig();
-
-	void updateResource();
-	void updateMessage();
-
+	bool readEEPROMConfig();
 	void saveDevicesToEEPROM();
-
-	void LinkDevice();
-	void UnLinkDevice();
 };
 #endif
